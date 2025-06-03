@@ -2,9 +2,14 @@
 import random as rand
 from copy import deepcopy
 
+class Printer:
+  def __init__(self, obj):
+    self.target = obj
+  def print_game():
+    pass
 
 class Card:
-  mapping = {
+  CARD_VALUE = {
     0: "Spade",
     1: "Diamond", 
     2: "Heart", 
@@ -30,15 +35,21 @@ class Card:
     return f"{self.mapping[self.rank] if self.rank > 10 else self.rank} of {self.mapping[self.suit]}"
 
 class Deck:
-  def __init__(self, cards=None):
+  def __init__(self, mode='kuhn'):
     self.cards = []
-    if cards:
-      self.cards = cards
-  
+    if mode == 'kuhn':
+      self.cards = [Card(0, i) for i in (11, 12, 13)]
+    
+    if mode == 'holdem':
+      for suit in range(0, 4):
+        for rank in range(2, 15):
+          self.cards.append(Card(suit, rank))
+    
+    self.shuffle()
+
   def shuffle(self):
     rand.shuffle(self.cards)
     
-  
   def deal(self):
     return self.cards.pop()
   
@@ -50,62 +61,140 @@ class Deck:
   
   __str__ = __repr__
 
-class State:
-  def __init__(self, cards=None):
-    # Current stage:
-    #   0 is p1 action
-    #   1 is p2 action
-    #   2 is p1 action upon p2 bet
-    self.stage = 0
-    
-    # if theres an active bet
-    self.active_bet = False
-    self.pot = 2
+class Player:
+  def __init__(self, name, stack = 10):
+    self.stack = stack
+    self.cards = []
+    self.name = name
 
-    # List of actions so far
-    self.action_list = []
+  def get_stack(self):
+    return self.stack
+
+  def show_cards(self):
+    return self.card
+
+  def get_cards(self, cards):
+    self.cards = cards
+
+  def muck_cards(self):
+    self.cards = []
+
+  def ante(self, amount):
+    self.stack -= amount
+    self.validate_stack(amount)
+  bet = ante
+
+  def add_money(self, amount):
+    self.stack += amount
+  
+  def validate_stack(self, amount):
+    if self.stack < 0:
+      raise Exception(f"Insufficient Money in Stack. Amt={self.stack}, req={amount}")
 
 
+class StateAction:
+  def __init__(self, game, player, action, state, amount=None):
+    self.prev_state = None
+    self.amount = amount
+    self.player = Player
+
+    match action:
+      case 'A' | 'B' | 'C':
+        player.ante(self.amount)
+        game.add_to_pot(self.amount)
+      case 'F':
+        pass
+      case 'X':
+        pass
+
+    if state:
+      self.prev_state = state
 
 
-
-class Game:
-  def __init__(self, action=None):
+class NullState:
+  def __init__(self):
     pass
 
-  def start(self):
-    # Shuffle and deal
-    self.deck = Deck([Card(0, i) for i in (12, 13, 14)])
-    rand.shuffle(self.deck)
+class KuhnPokerGame:
+# TODO track folded players
+  def __init__(self, stacks):
+    #  In normal poker, small blind is [0], and button is [-1]
+    self.players =  [Player(stack) for stack in stacks]
+    self.in_hand =  {player: True for player in self.players}
 
-    p1_card = self.deck.deal()
-    p2_card = self.deck.deal()
+    self.raise_amount = 0
+    self.pot = 0
+    self.last_state = NullState()
+    self.rounds = [self.preflop, self.postflop]
+
+  def play_hand(self):
+    self.deck = Deck(mode='kuhn')
+
+    for player in self.players:
+      player.get_cards([self.deck.deal()]) 
     
-    self.state = State(cards=(p1_card, p2_card))
+    for game_round in self.rounds:
+      game_round()
 
+      # Check if only 1 player in hand
+      if sum(self.in_hand.values()) == 1:
+        self.end_hand()
+        return
 
-  def utility(self):
-    return self.pot * 3
-    # positive is the amount p1 wins, negative is the amount p2 wins
-    pass
+    self.showdown()
+    self.end_hand()
 
-  def actions(self):
-    if self.turn == 0:
-      for action in ['X', 'B']:
-        return 
+  # Marks players as not in_hand if they have worse cards 
+  # TODO make this scaleable
+  def showdown(self):
+    if self.players[0].show_cards()[0] > self.players[1].show_cards()[0]:
+      self.in_hand[self.players[1]] = False
+    if self.players[0].show_cards()[0] < self.players[1].show_cards()[0]:
+      self.in_hand[self.players[0]] = False
 
-    if self.turn == 1:
-      pass
+  def end_hand(self):
+    all_players = list(self.in_hand)
+    true_players = []
+    for player, state in all_players:
+      player.muck_cards()
+      if state:
+        true_players.append(player)
 
+    winnings = self.pot / len(true_players)
+    
+    for player in true_players:
+      player.add_money(winnings)
 
+  def preflop(self):
+    for player in self.players:
+      self.last_state = StateAction(self, player, 'A', self.last_state, 1)
+
+  def postflop(self):
+    for player in self.players:
+      action = self.query_action()
+      if len(action) == 2:
+        self.raise_amount = action[1]
+        self.last_state = StateAction(self, player, action[0], self.last_state, action[1])
+      elif action == 'C':
+        self.last_state = StateAction(self, player, action[0], self.last_state, self.raise_amount)
+      else:
+        self.last_state = StateAction(self, player, action, self.last_state)
+
+  def query_action(self):
+    action = input("Action: ")
+    if action != 'B':
+      return action
+    print("Betting 1, because kuhn")
+    return (action, 1)
+
+  def add_to_pot(self, amount):
+    self.pot += amount
 
 
 if __name__ == '__main__':
-  card = [Card(0, i) for i in (12, 13, 14)]
+  game = KuhnPokerGame(stacks=[10, 10])
+  game.play_hand()  
+  game.print_last_hand()
 
-  print(card[1] < card[0])
-  print(card[1] > card[0])
-  print(card[1] == card[0])  
-  
 
 
