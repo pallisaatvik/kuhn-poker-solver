@@ -71,7 +71,7 @@ class Player:
     return self.stack
 
   def show_cards(self):
-    return self.card
+    return self.cards[0]
 
   def get_cards(self, cards):
     self.cards = cards
